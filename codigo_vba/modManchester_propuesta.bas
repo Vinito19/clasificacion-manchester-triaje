@@ -5,7 +5,7 @@ Option Explicit
 '=============================
 Public Const TEXTO_ENCABEZADO As String = "Nombres"
 Public Const HOJA_PACIENTES As String = "Pacientes"
-Public Const COLUMNA_MANCHESTER As String = "Clasificaci" & ChrW(243) & "n Manchester"
+Public Const COLUMNA_MANCHESTER As String = "Clasificación Manchester"
 
 '=============================
 ' CORRECCION #1: UltimaFilaDatosWs optimizada
@@ -191,7 +191,6 @@ Public Function ColumnaPrimerCheckbox() As Long
     Dim r As Long
     r = ColumnaPrimerCheckboxWs(ActiveSheet)
     If r = 0 Then
-        MsgBox "No se encontr" & ChrW(243) & " la columna '" & COLUMNA_MANCHESTER & "'.", vbCritical
     End If
     ColumnaPrimerCheckbox = r
 End Function
@@ -802,6 +801,4 @@ Public Sub ConfigurarMenuDesplegable()
         .InputTitle = "Men" & ChrW(250) & " de Acciones"
         .InputMessage = "Seleccione una acci" & ChrW(243) & "n del men" & ChrW(250)
         .ErrorTitle = "Opci" & ChrW(243) & "n no v" & ChrW(225) & "lida"
-        .ErrorMessage = "Por favor, seleccione una opci" & ChrW(243) & "n v" & ChrW(225) & "lida."
-    End With
-End Sub
+        .ErrorMessage = "Por favor, seleccione una opci" & ChrW(243) & "n v" & C
