@@ -5,28 +5,32 @@ Option Explicit
 '=============================
 Public Const TEXTO_ENCABEZADO As String = "Nombres"
 Public Const HOJA_PACIENTES As String = "Pacientes"
-Public Const COLUMNA_MANCHESTER As String = "Clasificación Manchester"
+Public Const COLUMNA_MANCHESTER As String = "Clasificaci" & ChrW(243) & "n Manchester"
+
+'=============================
+' CORRECCION #1: UltimaFilaDatosWs optimizada
+' Antes: Iteraba ws.CheckBoxes Y ws.Shapes (doble iteracion)
+' Ahora: Usa Range.Find (una sola operacion O(1))
+'=============================
 Public Function UltimaFilaDatosWs(ByVal ws As Worksheet) As Long
-    Dim cb As CheckBox
     Dim ultima As Long
-    Dim shp As Shape
+    Dim lastCell As Range
+    
     If ws Is Nothing Then Exit Function
     ultima = PrimeraFilaDatosWs(ws)
+    
+    ' CORRECCION: Usar Find para encontrar la ultima celda usada
+    ' Esto es O(1) en lugar de O(n) iterando todos los shapes
     On Error Resume Next
-    For Each cb In ws.CheckBoxes
-        If cb.TopLeftCell.Row > ultima Then ultima = cb.TopLeftCell.Row
-    Next cb
-    For Each shp In ws.Shapes
-        If shp.Type = msoFormControl Then
-            If shp.FormControlType = xlCheckBox Then
-                If shp.TopLeftCell.Row > ultima Then ultima = shp.TopLeftCell.Row
-            End If
-        End If
-    Next shp
+    Set lastCell = ws.Cells.Find("*", ws.Cells(1, 1), _
+        xlValues, , xlByRows, xlPrevious)
+    If Not lastCell Is Nothing Then
+        If lastCell.Row > ultima Then ultima = lastCell.Row
+    End If
     On Error GoTo 0
+    
     UltimaFilaDatosWs = ultima
 End Function
-
 
 '=========================================================
 ' LIMPIAR FILTRO DE FORMA SEGURA (funciona en hoja protegida)
@@ -168,7 +172,6 @@ Public Function ColumnaInicioColorWs(ByVal ws As Worksheet) As Long
     If uc > 0 Then ColumnaInicioColorWs = uc + 1
 End Function
 
-
 '=============================
 ' COMPATIBILIDAD (libro/hoja activos)
 '=============================
@@ -245,16 +248,16 @@ Public Sub AplicarColor(ByVal fila As Long, ByVal columna As Long)
 End Sub
 
 '=============================
-' NOMBRES UNICOS DE CHECKBOX
+' CORRECCION #2: ExisteForma con acceso directo
+' Antes: Iteraba todos los shapes (O(n))
+' Ahora: Acceso directo por nombre (O(1))
 '=============================
 Public Function ExisteForma(ByVal ws As Worksheet, ByVal nombre As String) As Boolean
     Dim shp As Shape
-    For Each shp In ws.Shapes
-        If StrComp(shp.Name, nombre, vbTextCompare) = 0 Then
-            ExisteForma = True
-            Exit Function
-        End If
-    Next shp
+    On Error Resume Next
+    Set shp = ws.Shapes(nombre)
+    On Error GoTo 0
+    ExisteForma = Not shp Is Nothing
 End Function
 
 Public Function NombreCheckboxLibre(ByVal ws As Worksheet, ByVal fila As Long, ByVal col As Long) As String
@@ -284,7 +287,9 @@ Public Sub RelinkCheckboxesWs(ByVal ws As Worksheet)
 End Sub
 
 '=============================
-' MACRO PRINCIPAL DEL CHECKBOX
+' CORRECCION #3: CheckboxManchester con ErrorHandler
+' Antes: Saltaba a Salida sin registrar el error
+' Ahora: Registra Err.Number y Err.Description en Debug.Print
 '=============================
 Public Sub CheckboxManchester()
     Dim cb As CheckBox
@@ -298,7 +303,8 @@ Public Sub CheckboxManchester()
     Set ws = ActiveSheet
     prevScreen = Application.ScreenUpdating
     prevEvents = Application.EnableEvents
-    On Error GoTo Salida
+    
+    On Error GoTo ErrorHandler
     Application.ScreenUpdating = False
 
     Set cb = ws.CheckBoxes(CStr(Application.Caller))
@@ -328,6 +334,12 @@ Public Sub CheckboxManchester()
 Salida:
     Application.EnableEvents = prevEvents
     Application.ScreenUpdating = prevScreen
+    Exit Sub
+
+ErrorHandler:
+    Debug.Print "Error en CheckboxManchester (" & Application.Caller & "): " & _
+                Err.Number & " - " & Err.Description
+    Resume Salida
 End Sub
 
 '=============================
@@ -341,13 +353,9 @@ Public Sub NuevoPacienteEn(ByRef wb As Workbook)
     Dim ws As Worksheet
     Dim ultimaFila As Long, nuevaFila As Long
     Dim ultimaCol As Long
-    Dim cbNuevo As CheckBox
     Dim primerCheck As Long, ultimoCheck As Long
     Dim primeraColColor As Long
-    Dim i As Long
-    Dim celda As Range
     Dim limitePacientes As Long
-    Dim ancho As Double, alto As Double
     Dim prevScreen As Boolean, prevEvents As Boolean
     Dim prevCalc As XlCalculation
 
@@ -388,45 +396,8 @@ Public Sub NuevoPacienteEn(ByRef wb As Workbook)
 
     nuevaFila = ultimaFila + 1
 
-    ' Copiar solo formatos y validaci?n (sin checkboxes)
-    ws.Rows(ultimaFila).Copy
-    ws.Rows(nuevaFila).PasteSpecial xlPasteFormats
-    ws.Rows(nuevaFila).PasteSpecial xlPasteValidation
-    Application.CutCopyMode = False
-
-    ' Copiar f?rmulas si las hay (desde ultimoCheck+1 hasta ultimaCol)
-    On Error Resume Next
-    ws.Range(ws.Cells(ultimaFila, ultimoCheck + 1), ws.Cells(ultimaFila, ultimaCol)).Copy
-    ws.Range(ws.Cells(nuevaFila, ultimoCheck + 1), ws.Cells(nuevaFila, ultimaCol)).PasteSpecial xlPasteFormulas
-    On Error GoTo 0
-    Application.CutCopyMode = False
-
-    ' Limpiar datos constantes
-    On Error Resume Next
-    ws.Range(ws.Cells(nuevaFila, 1), ws.Cells(nuevaFila, primerCheck - 1)).SpecialCells(xlCellTypeConstants).ClearContents
-    ws.Range(ws.Cells(nuevaFila, ultimoCheck + 1), ws.Cells(nuevaFila, ultimaCol)).SpecialCells(xlCellTypeConstants).ClearContents
-    On Error GoTo 0
-
-    ' Limpiar color de fondo
-    If ultimaCol > 0 And primeraColColor > 0 Then
-        ws.Range(ws.Cells(nuevaFila, primeraColColor), ws.Cells(nuevaFila, ultimaCol)).Interior.Pattern = xlNone
-    End If
-
-    ' Crear los 5 nuevos checkbox
-    For i = primerCheck To ultimoCheck
-        Set celda = ws.Cells(nuevaFila, i)
-        ancho = celda.Width - 4: If ancho < 6 Then ancho = 6
-        alto = celda.Height - 4: If alto < 6 Then alto = 6
-        Set cbNuevo = ws.CheckBoxes.Add(celda.Left + 2, celda.Top + 2, ancho, alto)
-        With cbNuevo
-            .Caption = ""
-            .Name = NombreCheckboxLibre(ws, nuevaFila, i)
-            .LinkedCell = celda.Address
-            .OnAction = "CheckboxManchester"
-            .Placement = xlMoveAndSize
-            .Value = xlOff
-        End With
-    Next i
+    ' CORRECCION #4: Usar procedimiento comun para copiar fila
+    CopiarFilaPaciente ws, ultimaFila, nuevaFila
 
     Application.Calculation = prevCalc
     Application.EnableEvents = prevEvents
@@ -444,29 +415,84 @@ Limpiar:
 End Sub
 
 '=============================
+' CORRECCION #4: Procedimiento comun para copiar fila de paciente
+' Antes: NuevoPacienteEn y AgregarPacienteEnLibro tenian ~80% del codigo duplicado
+' Ahora: Ambos llaman a este procedimiento comun
+'=============================
+Private Sub CopiarFilaPaciente(ByVal ws As Worksheet, _
+                                ByVal origenFila As Long, _
+                                ByVal destinoFila As Long)
+    Dim primerCheck As Long, ultimoCheck As Long
+    Dim primeraColColor As Long, ultimaCol As Long
+    Dim i As Long, celda As Range
+    Dim cbNuevo As CheckBox
+    Dim ancho As Double, alto As Double
+    
+    primerCheck = ColumnaPrimerCheckboxWs(ws)
+    ultimoCheck = ColumnaUltimoCheckboxWs(ws)
+    primeraColColor = ColumnaInicioColorWs(ws)
+    ultimaCol = UltimaColumnaFormatoWs(ws)
+    
+    ' Copiar formatos y validacion
+    ws.Rows(origenFila).Copy
+    ws.Rows(destinoFila).PasteSpecial xlPasteFormats
+    ws.Rows(destinoFila).PasteSpecial xlPasteValidation
+    Application.CutCopyMode = False
+    
+    ' Copiar formulas
+    On Error Resume Next
+    ws.Range(ws.Cells(origenFila, ultimoCheck + 1), _
+             ws.Cells(origenFila, ultimaCol)).Copy
+    ws.Range(ws.Cells(destinoFila, ultimoCheck + 1), _
+             ws.Cells(destinoFila, ultimaCol)).PasteSpecial xlPasteFormulas
+    On Error GoTo 0
+    Application.CutCopyMode = False
+    
+    ' Limpiar constantes
+    On Error Resume Next
+    ws.Range(ws.Cells(destinoFila, 1), _
+             ws.Cells(destinoFila, primerCheck - 1)).SpecialCells(xlCellTypeConstants).ClearContents
+    ws.Range(ws.Cells(destinoFila, ultimoCheck + 1), _
+             ws.Cells(destinoFila, ultimaCol)).SpecialCells(xlCellTypeConstants).ClearContents
+    On Error GoTo 0
+    
+    ' Limpiar color
+    If ultimaCol > 0 And primeraColColor > 0 Then
+        ws.Range(ws.Cells(destinoFila, primeraColColor), _
+                 ws.Cells(destinoFila, ultimaCol)).Interior.Pattern = xlNone
+    End If
+    
+    ' Crear checkboxes
+    For i = primerCheck To ultimoCheck
+        Set celda = ws.Cells(destinoFila, i)
+        ancho = celda.Width - 4: If ancho < 6 Then ancho = 6
+        alto = celda.Height - 4: If alto < 6 Then alto = 6
+        Set cbNuevo = ws.CheckBoxes.Add(celda.Left + 2, celda.Top + 2, ancho, alto)
+        With cbNuevo
+            .Caption = ""
+            .Name = NombreCheckboxLibre(ws, destinoFila, i)
+            .LinkedCell = celda.Address
+            .OnAction = "CheckboxManchester"
+            .Placement = xlMoveAndSize
+            .Value = xlOff
+        End With
+    Next i
+End Sub
+
+'=============================
 ' AGREGAR PACIENTE EN UN LIBRO ESPECIFICO
 '=============================
 Public Sub AgregarPacienteEnLibro(ByRef wb As Workbook)
     Dim ws As Worksheet
     Dim ultimaFila As Long, nuevaFila As Long
-    Dim ultimaCol As Long
-    Dim cbNuevo As CheckBox
     Dim chk As CheckBox
-    Dim primerCheck As Long, ultimoCheck As Long
-    Dim primeraColColor As Long
-    Dim i As Long
-    Dim celda As Range
-    Dim ancho As Double, alto As Double
+    Dim primerCheck As Long
     Dim prevScreen As Boolean, prevEvents As Boolean
     Dim prevCalc As XlCalculation
 
     Set ws = HojaPacientes(wb)
 
     primerCheck = ColumnaPrimerCheckboxWs(ws)
-    ultimoCheck = ColumnaUltimoCheckboxWs(ws)
-    primeraColColor = ColumnaInicioColorWs(ws)
-    ultimaCol = UltimaColumnaFormatoWs(ws)
-
     If primerCheck = 0 Then Exit Sub
 
     prevScreen = Application.ScreenUpdating
@@ -482,7 +508,7 @@ Public Sub AgregarPacienteEnLibro(ByRef wb As Workbook)
     ultimaFila = UltimaFilaDatosWs(ws)
     If ultimaFila < PrimeraFilaDatosWs(ws) Then ultimaFila = PrimeraFilaDatosWs(ws)
 
-    ' Reutilizar la primera fila (plantilla vac?a)
+    ' Reutilizar la primera fila (plantilla vacía)
     If ultimaFila = PrimeraFilaDatosWs(ws) And Trim(CStr(ws.Cells(ultimaFila, 1).Value)) = "" Then
         For Each chk In ws.CheckBoxes
             If chk.TopLeftCell.Row = ultimaFila Then chk.Value = xlOff
@@ -496,40 +522,8 @@ Public Sub AgregarPacienteEnLibro(ByRef wb As Workbook)
 
     nuevaFila = ultimaFila + 1
 
-    ws.Rows(ultimaFila).Copy
-    ws.Rows(nuevaFila).PasteSpecial xlPasteFormats
-    ws.Rows(nuevaFila).PasteSpecial xlPasteValidation
-    Application.CutCopyMode = False
-
-    On Error Resume Next
-    ws.Range(ws.Cells(ultimaFila, ultimoCheck + 1), ws.Cells(ultimaFila, ultimaCol)).Copy
-    ws.Range(ws.Cells(nuevaFila, ultimoCheck + 1), ws.Cells(nuevaFila, ultimaCol)).PasteSpecial xlPasteFormulas
-    On Error GoTo 0
-    Application.CutCopyMode = False
-
-    On Error Resume Next
-    ws.Range(ws.Cells(nuevaFila, 1), ws.Cells(nuevaFila, primerCheck - 1)).SpecialCells(xlCellTypeConstants).ClearContents
-    ws.Range(ws.Cells(nuevaFila, ultimoCheck + 1), ws.Cells(nuevaFila, ultimaCol)).SpecialCells(xlCellTypeConstants).ClearContents
-    On Error GoTo 0
-
-    If ultimaCol > 0 And primeraColColor > 0 Then
-        ws.Range(ws.Cells(nuevaFila, primeraColColor), ws.Cells(nuevaFila, ultimaCol)).Interior.Pattern = xlNone
-    End If
-
-    For i = primerCheck To ultimoCheck
-        Set celda = ws.Cells(nuevaFila, i)
-        ancho = celda.Width - 4: If ancho < 6 Then ancho = 6
-        alto = celda.Height - 4: If alto < 6 Then alto = 6
-        Set cbNuevo = ws.CheckBoxes.Add(celda.Left + 2, celda.Top + 2, ancho, alto)
-        With cbNuevo
-            .Caption = ""
-            .Name = NombreCheckboxLibre(ws, nuevaFila, i)
-            .LinkedCell = celda.Address
-            .OnAction = "CheckboxManchester"
-            .Placement = xlMoveAndSize
-            .Value = xlOff
-        End With
-    Next i
+    ' CORRECCION #4: Usar procedimiento comun para copiar fila
+    CopiarFilaPaciente ws, ultimaFila, nuevaFila
 
     Application.Calculation = prevCalc
     Application.EnableEvents = prevEvents
@@ -605,15 +599,18 @@ Limpiar:
 End Sub
 
 '=============================
-' ELIMINAR PACIENTE SELECCIONADO
+' CORRECCION #5: EliminarPacienteSeleccionado con Union
+' Antes: Bubble sort O(n²) + eliminacion fila por fila (n reorganizaciones)
+' Ahora: Union para eliminar todo de una vez (1 reorganizacion, sin ordenar)
 '=============================
 Public Sub EliminarPacienteSeleccionado()
     Dim ws As Worksheet
     Dim respuesta As VbMsgBoxResult
-    Dim i As Long, j As Long, n As Long, tmp As Long
+    Dim i As Long, j As Long, n As Long
     Dim filaActual As Long
     Dim filasAEliminar() As Long
     Dim primera As Long
+    Dim rngEliminar As Range
     Dim prevScreen As Boolean, prevEvents As Boolean
     Dim prevCalc As XlCalculation
 
@@ -642,17 +639,6 @@ Public Sub EliminarPacienteSeleccionado()
     If n = 0 Then Exit Sub
     ReDim Preserve filasAEliminar(1 To n)
 
-    ' Ordenar descendente para borrar de abajo hacia arriba
-    For i = 1 To n - 1
-        For j = i + 1 To n
-            If filasAEliminar(j) > filasAEliminar(i) Then
-                tmp = filasAEliminar(i)
-                filasAEliminar(i) = filasAEliminar(j)
-                filasAEliminar(j) = tmp
-            End If
-        Next j
-    Next i
-
     respuesta = MsgBox(ChrW(191) & "Desea eliminar los pacientes seleccionados?", vbYesNo + vbQuestion, "Eliminar pacientes")
     If respuesta = vbNo Then Exit Sub
 
@@ -665,8 +651,12 @@ Public Sub EliminarPacienteSeleccionado()
     Application.EnableEvents = False
     Application.Calculation = xlCalculationManual
 
+    ' CORRECCION: Usar Union para eliminar todo de una vez
+    ' No necesitamos ordenar las filas porque Union maneja el orden automaticamente
     For i = 1 To n
         filaActual = filasAEliminar(i)
+        
+        ' Eliminar checkboxes de esta fila
         For j = ws.Shapes.Count To 1 Step -1
             If ws.Shapes(j).Type = msoFormControl Then
                 If ws.Shapes(j).FormControlType = xlCheckBox Then
@@ -674,8 +664,19 @@ Public Sub EliminarPacienteSeleccionado()
                 End If
             End If
         Next j
-        ws.Rows(filaActual).Delete
+        
+        ' Acumular filas en el rango Union
+        If rngEliminar Is Nothing Then
+            Set rngEliminar = ws.Rows(filaActual)
+        Else
+            Set rngEliminar = Union(rngEliminar, ws.Rows(filaActual))
+        End If
     Next i
+    
+    ' Eliminar todas las filas de una vez (una sola reorganizacion)
+    If Not rngEliminar Is Nothing Then
+        rngEliminar.Delete
+    End If
 
     RelinkCheckboxesWs ws
 
@@ -689,43 +690,24 @@ Limpiar:
     Application.Calculation = prevCalc
     Application.EnableEvents = prevEvents
     Application.ScreenUpdating = prevScreen
-MsgBox "Ocurrió un error al eliminar los pacientes: " & Err.Description, vbCritical
+    MsgBox "Ocurri" & ChrW(243) & " un error al eliminar los pacientes: " & Err.Description, vbCritical
 End Sub
-
-
 
 '=========================================================
 ' ABRIR PANEL DE CONTROL
-' Esta macro se asigna al botón de la hoja
 '=========================================================
 Public Sub AbrirPanelControl()
-    ' Verificar que el UserForm existe
     On Error GoTo ErrorForm
-    
     frmPanelControl.Show vbModeless
     Exit Sub
-    
 ErrorForm:
-    MsgBox "No se encontró el Panel de Control." & vbCrLf & _
+    MsgBox "No se encontr" & ChrW(243) & " el Panel de Control." & vbCrLf & _
            "Verifique que el UserForm 'frmPanelControl' existe.", vbCritical
 End Sub
 
-
 '=========================================================
-' COMBOBOX DE ACCIONES (control de formulario cboAcciones)
-' Adaptado de la especificación ActiveX: en este Office la
-' inserción de ActiveX en hojas está bloqueada (error 1004),
-' por lo que se usa un desplegable de formulario con la lista
-' en el rango AD1:AD8 (hoja Pacientes).
-' Mapeo por ListIndex (base 1):
-'   1 texto por defecto | 2 sep Pacientes | 3-5 acciones Pacientes
-'   6 sep Gestión | 7-8 acciones Gestión
+' COMBOBOX DE ACCIONES
 '=========================================================
-
-
-
-
-
 Public Sub ConfigurarMenuDesplegable()
     Dim ws As Worksheet
     Dim defaultText As String
@@ -784,17 +766,17 @@ Public Sub ConfigurarMenuDesplegable()
     ws.Rows(6).RowHeight = 28.8
     ws.Columns(1).ColumnWidth = ws.Columns(2).ColumnWidth
 
-    ' Sombra lateral (B6) - forma parte del merge
+    ' Sombra lateral (B6)
     ws.Range("B6").Interior.Color = RGB(30, 41, 59)
 
-    ' Fila 7: recuperar como separador simple, sin estilos extra
+    ' Fila 7: separador simple
     ws.Rows(7).RowHeight = 15
     With ws.Range("A7:B7")
         .Interior.Pattern = xlNone
         .Borders.LineStyle = xlNone
     End With
 
-    ' Restaurar borde superior de B8 (el separador previo lo habia pisado)
+    ' Restaurar borde superior de B8
     With ws.Range("B8")
         .Borders(xlEdgeTop).LineStyle = .Borders(xlEdgeLeft).LineStyle
         .Borders(xlEdgeTop).Weight = .Borders(xlEdgeLeft).Weight
@@ -823,7 +805,3 @@ Public Sub ConfigurarMenuDesplegable()
         .ErrorMessage = "Por favor, seleccione una opci" & ChrW(243) & "n v" & ChrW(225) & "lida."
     End With
 End Sub
-
-
-
-
